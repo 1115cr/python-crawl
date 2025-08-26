@@ -136,6 +136,7 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+<<<<<<< HEAD
 
 # 爬取小说中小说目录
-
+爬取小说/小说
