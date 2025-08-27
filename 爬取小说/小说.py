@@ -5,9 +5,13 @@ import os
 from os.path import exists
 import random
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 session = requests.session()
 
+# 添加线程锁，确保文件写入顺序
+file_lock = threading.Lock()
 
 def get_proxy_user_agent():
     user_agents = [
@@ -87,84 +91,106 @@ def get_proxy_user_agent():
         "proxy": random.choice(proxies)
     }
 
-
-def fetch_chapter_content(chapter_urls, titles):
-    """抓取章节内容并处理分页逻辑"""
+def fetch_single_chapter(chapter_info):
+    """抓取单个章节内容，包括分页处理"""
+    index, chapter_url, title = chapter_info
     basic_url = "https://www.biqugequ.org"
+    config = get_proxy_user_agent()
 
-    # 外层进度条显示章节进度
-    with tqdm(total=len(chapter_urls), desc="章节进度", unit="章") as chapter_pbar:
-        for i, chapter_url in enumerate(chapter_urls):
-            config = get_proxy_user_agent()
-            chapter_pbar.set_postfix({"当前章节": titles[i][:10] + "..." if len(titles[i]) > 10 else titles[i]})
+    try:
+        response = session.get(chapter_url, headers=config["headers"], proxies=config["proxy"], timeout=10)
+        content_tree = etree.HTML(response.text)
 
-            try:
-                response = session.get(chapter_url, headers=config["headers"], proxies=config["proxy"], timeout=10)
+        # 提取当前页面内容
+        content = content_tree.xpath('//*[@id="content"]/p/text()')
+        next_page_text = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/text()')
+        next_page_href = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/@href')
+
+        # 清理无效内容
+        if content and '下一页' in content[-1]:
+            content.pop()
+
+        # 处理分页请求
+        while next_page_text and '下一页' in next_page_text[0]:
+            # 构建下一页URL
+            if next_page_href:
+                next_page_url = f"{basic_url}{next_page_href[0]}"
+
+                # 发起分页请求
+                response = session.get(next_page_url, headers=config["headers"], proxies=config["proxy"],
+                                       timeout=10)
                 content_tree = etree.HTML(response.text)
 
-                # 提取当前页面内容
-                content = content_tree.xpath('//*[@id="content"]/p/text()')
+                # 提取分页内容
+                page_content = content_tree.xpath('//*[@id="content"]/p/text()')
+                if page_content and '下一页' in page_content[-1]:
+                    page_content.pop()
+
+                content.extend(page_content)
+                # 更新分页信息
                 next_page_text = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/text()')
                 next_page_href = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/@href')
+            else:
+                break
 
-                # 清理无效内容
-                if content and '下一页' in content[-1]:
-                    content.pop()
+        # 返回章节内容，保持索引以确保顺序
+        filtered_content = [line.strip() for line in content if line.strip()]
+        return index, title, filtered_content
 
-                # 内层进度条显示分页进度（如果需要）
-                page_count = 1
-                pages_to_fetch = 0
+    except Exception as e:
+        print(f"章节 {title} 抓取失败: {e}")
+        return index, title, []
 
-                # 先计算有多少分页
-                temp_next_text = next_page_text[:]
-                temp_next_href = next_page_href[:]
-                while temp_next_text and '下一页' in temp_next_text[0]:
-                    if temp_next_href:
-                        pages_to_fetch += 1
-                        # 这里可以模拟计算分页数量，实际应用中可能需要特殊处理
-                        temp_next_text = []  # 简化处理，避免无限循环
-                    else:
-                        break
+def write_chapter_to_file(chapter_data, filename):
+    """将章节内容写入文件，使用锁确保顺序写入"""
+    index, title, content = chapter_data
 
-                # 处理分页请求
-                with tqdm(total=pages_to_fetch, desc=f"  分页 {titles[i][:10]}",
-                          unit="页", leave=False) as page_pbar:
-                    while next_page_text and '下一页' in next_page_text[0]:
-                        # 构建下一页URL
-                        if next_page_href:
-                            next_page_url = f"{basic_url}{next_page_href[0]}"
+    with file_lock:
+        with open(filename, 'a', encoding='utf-8') as file:
+            file.write(title + '\n')
+            file.write('\n'.join(content) + '\n\n')
 
-                            # 发起分页请求
-                            response = session.get(next_page_url, headers=config["headers"], proxies=config["proxy"],
-                                                   timeout=10)
-                            content_tree = etree.HTML(response.text)
+def fetch_chapter_content(chapter_urls, titles):
+    """使用并发方式抓取章节内容，同时保证写入顺序"""
+    basic_url = "https://www.biqugequ.org"
 
-                            # 提取分页内容
-                            page_content = content_tree.xpath('//*[@id="content"]/p/text()')
-                            if page_content and '下一页' in page_content[-1]:
-                                page_content.pop()
+    # 创建章节信息列表，包含索引以保持顺序
+    chapter_info_list = [(i, chapter_urls[i], titles[i]) for i in range(len(chapter_urls))]
 
-                            content.extend(page_content)
-                            # 更新分页信息
-                            next_page_text = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/text()')
-                            next_page_href = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/@href')
-                            page_count += 1
-                            page_pbar.update(1)
-                        else:
-                            break
+    # 使用线程池并发抓取章节内容
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # 提交所有任务
+        future_to_chapter = {executor.submit(fetch_single_chapter, info): info
+                             for info in chapter_info_list}
 
-                # 写入文件
-                with open('小说/仙逆.txt', 'a', encoding='utf-8') as file:
-                    file.write(titles[i] + '\n')
-                    filtered_content = [line.strip() for line in content if line.strip()]
-                    file.write('\n'.join(filtered_content) + '\n\n')
+        # 收集结果并按顺序存储
+        results = {}
+        with tqdm(total=len(chapter_urls), desc="章节进度", unit="章") as pbar:
+            for future in as_completed(future_to_chapter):
+                index, title, content = future.result()
+                results[index] = (title, content)
+                pbar.update(1)
 
-            except Exception as e:
-                chapter_pbar.set_postfix({"错误": f"章节{i}失败"})
-                continue
-            finally:
-                chapter_pbar.update(1)
+                # 检查是否可以按顺序写入文件
+                write_chapters_in_order(results, len(chapter_urls), '小说/仙逆.txt')
 
+    # 确保所有章节都已写入
+    write_chapters_in_order(results, len(chapter_urls), '小说/仙逆.txt')
+
+def write_chapters_in_order(results, total_chapters, filename):
+    """按顺序将已抓取的章节写入文件"""
+    next_index = getattr(write_chapters_in_order, 'next_index', 0)
+
+    while next_index < total_chapters and next_index in results:
+        title, content = results[next_index]
+        with file_lock:
+            with open(filename, 'a', encoding='utf-8') as file:
+                file.write(title + '\n')
+                file.write('\n'.join(content) + '\n\n')
+        next_index += 1
+
+    # 更新下次开始写入的索引
+    write_chapters_in_order.next_index = next_index
 
 if __name__ == '__main__':
     # 创建存储目录
