@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from lxml import etree
 import time
+from DownloadFunc import download_novel
 
 # 有效期360天
 cookies = {
@@ -278,7 +279,27 @@ def display_novel_details(novel):
     print("=" * 80)
 
 
-if __name__ == '__main__':
+def ask_download_novel(novel):
+    """询问用户是否要下载选中的小说"""
+    while True:
+        choice = input(f"\n是否要下载小说《{novel['title']}》? (y/n): ").strip().lower()
+        if choice in ['y', 'yes', '是']:
+            print(f"\n开始下载小说《{novel['title']}》...")
+            # 调用下载函数
+            result = download_novel(novel['url'], novel['title'])
+            if result:
+                print(f"小说《{novel['title']}》下载完成！")
+            else:
+                print(f"小说《{novel['title']}》下载失败！")
+            return True
+        elif choice in ['n', 'no', '否']:
+            return False
+        else:
+            print("请输入 y(是) 或 n(否)")
+
+
+def search_novel():
+    """搜索小说的主函数"""
     key = input("请输入小说名或者作者名：")
     print("正在搜索小说...")
     page_content = get_page_num(str(key))
@@ -287,7 +308,7 @@ if __name__ == '__main__':
     novel_list = get_content_list(page_content)
     if not novel_list:
         print("未找到相关小说")
-        exit()
+        return False
 
     print(f"找到 {len(novel_list)} 本相关小说")
 
@@ -303,5 +324,24 @@ if __name__ == '__main__':
     if selected_novel:
         # 显示选中小说的详细信息
         display_novel_details(selected_novel)
+
+        # 询问是否下载
+        if ask_download_novel(selected_novel):
+            return True
+        else:
+            # 用户选择不下载，返回是否继续搜索
+            while True:
+                continue_choice = input("\n是否继续搜索其他小说? (y/n): ").strip().lower()
+                if continue_choice in ['y', 'yes', '是']:
+                    return search_novel()  # 递归调用继续搜索
+                elif continue_choice in ['n', 'no', '否']:
+                    return True
+                else:
+                    print("请输入 y(是) 或 n(否)")
     else:
         print("已退出程序")
+        return True
+
+
+if __name__ == '__main__':
+    search_novel()
