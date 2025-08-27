@@ -28,12 +28,18 @@ cookies = {
     'qd_vt': '1756025850',
 }
 
+# 网站基础URL
 basic_url = "https://www.biqugequ.org"
 
+# 创建全局session对象，用于复用连接
 session = requests.session()
 
 
 def get_proxy_user_agent():
+    """
+    获取随机的User-Agent和代理IP配置
+    返回包含请求头和代理设置的字典
+    """
     user_agents = [
         # Mac
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -62,6 +68,8 @@ def get_proxy_user_agent():
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.58 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.70 Safari/537.36',
     ]
+
+    # 代理IP列表
     proxies = [
         {"http": "8.140.235.207:9001"},
         {"http": "103.85.53.62:8080"},
@@ -126,6 +134,11 @@ def get_proxy_user_agent():
 
 
 def get_page_num(key):
+    """
+    根据关键词搜索小说，返回搜索结果页面内容
+    :param key: 搜索关键词（小说名或作者名）
+    :return: 搜索结果页面的HTML内容
+    """
     url = 'https://www.biqugequ.org/search.html'
     data = {
         'searchtype': 'novelname',
@@ -143,6 +156,11 @@ def get_page_num(key):
 
 
 def get_content_list(page_content):
+    """
+    解析搜索结果页面，提取小说列表信息
+    :param page_content: 搜索结果页面的HTML内容
+    :return: 包含小说标题和URL的字典列表
+    """
     page = etree.HTML(page_content)
     li_list = page.xpath('//div[@id="newscontent"]/div[@class="l"]/ul/li')
     list_information = []
@@ -155,7 +173,11 @@ def get_content_list(page_content):
 
 
 def fetch_single_novel(novel_map):
-    """并发获取单本小说信息"""
+    """
+    获取单本小说的详细信息
+    :param novel_map: 包含小说标题和URL的字典
+    :return: 包含小说详细信息的字典
+    """
     try:
         config = get_proxy_user_agent()
         title = list(novel_map.keys())[0]
@@ -213,21 +235,29 @@ def fetch_single_novel(novel_map):
 
 
 def get_novel_information(list_information):
-    """使用并发方式获取小说信息"""
-    novels = []
+    """
+    使用并发方式获取所有小说信息，但保持原始顺序
+    :param list_information: 小说URL列表
+    :return: 按原始顺序排列的小说信息列表
+    """
+    # 初始化固定长度的列表以保持顺序
+    novels = [None] * len(list_information)
 
     # 使用线程池并发获取小说信息
     with ThreadPoolExecutor(max_workers=10) as executor:
-        # 提交所有任务
-        future_to_novel = {executor.submit(fetch_single_novel, novel_map): novel_map
-                           for novel_map in list_information}
+        # 提交所有任务，并保存future和索引的映射
+        future_to_index = {
+            executor.submit(fetch_single_novel, list_information[i]): i
+            for i in range(len(list_information))
+        }
 
         # 使用tqdm显示进度
         with tqdm(total=len(list_information), desc="获取小说信息", unit="本") as pbar:
             # 处理完成的任务
-            for future in as_completed(future_to_novel):
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
                 novel_info = future.result()
-                novels.append(novel_info)
+                novels[index] = novel_info  # 按原始顺序放置结果
                 # 显示当前处理的小说名称
                 pbar.set_postfix({"当前小说": novel_info["title"][:15] + "..." if len(novel_info["title"]) > 15 else
                 novel_info["title"]})
@@ -237,7 +267,10 @@ def get_novel_information(list_information):
 
 
 def display_novels(novels):
-    """显示小说列表供用户选择"""
+    """
+    显示小说列表供用户选择
+    :param novels: 小说信息列表
+    """
     print("\n找到以下小说:")
     print("-" * 80)
     for i, novel in enumerate(novels, 1):
@@ -248,7 +281,11 @@ def display_novels(novels):
 
 
 def get_user_choice(novels):
-    """获取用户选择的小说"""
+    """
+    获取用户选择的小说序号
+    :param novels: 小说列表
+    :return: 用户选择的小说信息或None（如果用户选择退出）
+    """
     while True:
         try:
             choice = input(f"\n请选择小说序号 (1-{len(novels)})，或输入 'q' 退出: ").strip()
@@ -264,7 +301,10 @@ def get_user_choice(novels):
 
 
 def display_novel_details(novel):
-    """显示小说详细信息"""
+    """
+    显示小说详细信息
+    :param novel: 小说信息字典
+    """
     print("\n" + "=" * 80)
     print("小说详细信息:")
     print("=" * 80)
@@ -280,7 +320,11 @@ def display_novel_details(novel):
 
 
 def ask_download_novel(novel):
-    """询问用户是否要下载选中的小说"""
+    """
+    询问用户是否要下载选中的小说
+    :param novel: 小说信息字典
+    :return: True表示用户选择下载，False表示用户取消下载
+    """
     while True:
         choice = input(f"\n是否要下载小说《{novel['title']}》? (y/n): ").strip().lower()
         if choice in ['y', 'yes', '是']:
@@ -298,8 +342,52 @@ def ask_download_novel(novel):
             print("请输入 y(是) 或 n(否)")
 
 
-def search_novel():
-    """搜索小说的主函数"""
+def show_other_novels(novels, current_novel):
+    """
+    显示其他搜索到的小说信息
+    :param novels: 所有已搜索的小说列表
+    :param current_novel: 当前查看的小说
+    :return: True表示成功显示其他小说，False表示返回上一级
+    """
+    # 过滤掉当前正在查看的小说
+    other_novels = [novel for novel in novels if novel != current_novel]
+    if not other_novels:
+        print("没有其他小说可查看")
+        return False
+
+    print("\n其他搜索到的小说:")
+    print("-" * 80)
+    for i, novel in enumerate(other_novels, 1):
+        print(f"{i}. {novel['title']}")
+        print(f"   作者: {novel['writer']}")
+        print(f"   分类: {novel['sort']}")
+        print("-" * 80)
+
+    while True:
+        choice = input(f"\n请选择查看的小说序号 (1-{len(other_novels)})，或输入 'b' 返回: ").strip()
+        if choice.lower() == 'b':
+            return False
+        try:
+            choice = int(choice)
+            if 1 <= choice <= len(other_novels):
+                display_novel_details(other_novels[choice - 1])
+                return True
+            else:
+                print(f"请输入有效的序号 (1-{len(other_novels)})")
+        except ValueError:
+            print("请输入有效的数字")
+
+
+def search_novel(searched_novels=None):
+    """
+    搜索小说的主函数
+    :param searched_novels: 已搜索的小说列表（用于累积历史记录）
+    :return: True表示程序正常结束，False表示搜索失败
+    """
+    # 如果没有传入已搜索小说列表，则初始化为空列表
+    if searched_novels is None:
+        searched_novels = []
+
     key = input("请输入小说名或者作者名：")
     print("正在搜索小说...")
     page_content = get_page_num(str(key))
@@ -315,6 +403,9 @@ def search_novel():
     print("正在获取小说详细信息...")
     novels = get_novel_information(novel_list)
 
+    # 将新搜索的小说添加到已搜索列表中
+    searched_novels.extend(novels)
+
     # 显示小说列表供用户选择
     display_novels(novels)
 
@@ -329,19 +420,34 @@ def search_novel():
         if ask_download_novel(selected_novel):
             return True
         else:
-            # 用户选择不下载，返回是否继续搜索
+            # 用户选择不下载，提供其他选项
             while True:
-                continue_choice = input("\n是否继续搜索其他小说? (y/n): ").strip().lower()
-                if continue_choice in ['y', 'yes', '是']:
-                    return search_novel()  # 递归调用继续搜索
-                elif continue_choice in ['n', 'no', '否']:
+                print("\n请选择操作:")
+                print("1. 查看其他搜索过的小说")
+                print("2. 搜索新的小说")
+                print("3. 退出程序")
+
+                choice = input("请输入选项 (1/2/3): ").strip()
+                if choice == '1':
+                    # 查看其他搜索过的小说
+                    if show_other_novels(searched_novels, selected_novel):
+                        continue  # 显示完后继续循环
+                    else:
+                        break  # 返回上一级菜单
+                elif choice == '2':
+                    # 搜索新的小说
+                    return search_novel(searched_novels)  # 递归调用继续搜索
+                elif choice == '3':
+                    # 退出程序
+                    print("已退出程序")
                     return True
                 else:
-                    print("请输入 y(是) 或 n(否)")
+                    print("请输入有效的选项 (1/2/3)")
     else:
         print("已退出程序")
         return True
 
 
 if __name__ == '__main__':
+    # 程序入口点
     search_novel()
