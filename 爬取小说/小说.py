@@ -8,8 +8,9 @@ from tqdm import tqdm
 
 session = requests.session()
 
-def get_prosy_userAgent():
-    user_agent_list = [
+
+def get_proxy_user_agent():
+    user_agents = [
         # Mac
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_0) AppleWebKit/535.11 (KHTML, like Gecko) Chrome/17.0.963.56 Safari/535.11',
@@ -37,97 +38,153 @@ def get_prosy_userAgent():
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.58 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.70 Safari/537.36',
     ]
-    proxy_list = [
-        {"http": "58.216.109.17:800"},
-        {"http": "113.118.159.77:9000"},
-        {"http": "39.105.27.30:3128"},
-        {"http": "117.86.6.34:1080"},
-        {"http": "8.146.209.239:3128"},
-        {"http": "8.219.97.248:80"},
-        {"http": "222.59.173.105:45108"},
-        {"http": "47.96.42.36:80"},
-        {"http": "222.59.173.105:45122"},
-        {"http": "222.59.173.105:45023"},
-        {"http": "180.103.19.163:1080"},
-        {"http": "8.146.207.243:8888"},
-        {"http": "120.26.123.95:8010"},
-        {"http": "222.59.173.105:45085"},
-        {"http": "119.3.113.150:9094"},
-        {"http": "47.96.42.36:80"},
-        {"http": "121.230.8.25:1080"},
-        {"http": "222.59.173.105:45105"},
-        {"http": "36.138.53.26:10017"},
-        {"http": "103.115.20.71:8181"},
-        {"http": "222.59.173.105:45250"},
+    proxies = [
+        {"http": "8.140.235.207:9001"},
+        {"http": "103.85.53.62:8080"},
+        {"http": "103.85.53.62:8080"},
+        {"http": "8.140.235.207:9001"},
+        {"http": "121.230.8.229:1080"},
+        {"http": "103.158.62.186:8088"},
+        {"http": "101.132.222.120:80"},
+        {"http": "183.60.141.41:443"},
         {"http": "58.216.109.14:800"},
-        {"http": "222.59.173.105:45115"},
-        {"http": "49.65.124.192:3128"},
-        {"http": "123.128.12.93:9050"},
-        {"http": "222.59.173.105:45090"},
-        {"http": "121.43.150.231:3128"},
-        {"http": "47.243.92.199:3128"},
-        {"http": "222.59.173.105:45035"},
-        {"http": "36.139.22.230:3128"},
-        {"http": "120.26.123.95:8010"},
-        {"http": "222.59.173.105:45088"},
-        {"http": "222.59.173.105:45058"},
-        {"http": "115.231.181.40:8128"},
-        {"http": "222.59.173.105:45124"},
-        {"http": "222.59.173.105:45026"},
+        {"http": "118.113.133.135:9999"},
+        {"http": "119.3.113.150:9094"},
+        {"http": "119.3.113.152:9094"},
+        {"http": "39.172.97.192:8060"},
+        {"http": "123.128.12.93:9055"},
+        {"http": "39.105.27.30:3128"},
+        {"http": "116.62.230.32:3128"},
+        {"http": "60.171.194.50:9300"},
+        {"http": "39.172.97.192:8060"},
+        {"http": "58.216.109.14:800"},
+        {"http": "119.3.113.150:9094"},
+        {"http": "8.219.97.248:80"},
+        {"http": "118.178.197.213:3128"},
+        {"http": "111.3.102.207:30001"},
+        {"http": "47.98.123.255:8035"},
+        {"http": "58.242.190.79:8095"},
+        {"http": "119.3.113.151:9094"},
+        {"http": "58.216.109.14:800"},
+        {"http": "118.178.197.213:3128"},
+        {"http": "58.216.109.17:800"},
+        {"http": "101.132.222.120:80"},
+        {"http": "103.85.53.62:8080"},
+        {"http": "110.80.140.213:443"},
+        {"http": "58.216.109.17:800"},
+        {"http": "61.158.175.38:9002"},
+        {"http": "119.3.113.152:9094"},
+        {"http": "115.190.24.138:8080"},
+        {"http": "116.62.230.32:3128"},
+        {"http": "116.62.230.32:3128"},
     ]
 
-    userAgent = random.choice(user_agent_list)
-    proxy = random.choice(proxy_list)
-
-    headers = {
-        "referer": "https://www.bqg128.com/",
-        "user-agent": userAgent
+    return {
+        "headers": {
+            "Referer": "https://www.bqg128.com/",
+            "user-agent": random.choice(user_agents)
+        },
+        "proxy": random.choice(proxies)
     }
-    return headers, proxy
 
-def get_content(url, title):
-    for index in tqdm(range(len(url))):
-        headers, proxy = get_prosy_userAgent()
 
-        response2 = session.get(url[index], headers=headers, proxies=proxy)
+def fetch_chapter_content(chapter_urls, titles):
+    """抓取章节内容并处理分页逻辑"""
+    basic_url = "https://www.biqugequ.org"
 
-        content_page = etree.HTML(response2.text)
-        content = content_page.xpath('//*[@id="content"]/p/text()')
-        if content and content[-1] and ('本小章还未完' in content[-1] or '请点击下一页继续阅读' in content[-1]):
-            content.pop()
+    # 外层进度条显示章节进度
+    with tqdm(total=len(chapter_urls), desc="章节进度", unit="章") as chapter_pbar:
+        for i, chapter_url in enumerate(chapter_urls):
+            config = get_proxy_user_agent()
+            chapter_pbar.set_postfix({"当前章节": titles[i][:10] + "..." if len(titles[i]) > 10 else titles[i]})
 
-        # 新增逻辑：如果content的第二个元素中包含'－－－－'符号，删除第一和第二个元素
-        if len(content) >= 2 and '－－' in content[1]:
-            content = content[2:]  # 删除前两个元素，保留从第三个开始的所有元素
+            try:
+                response = session.get(chapter_url, headers=config["headers"], proxies=config["proxy"], timeout=10)
+                content_tree = etree.HTML(response.text)
 
-        with open('小说/蛊真人.txt', 'a', encoding='utf-8') as file1:
-            file1.write(title[index])
-            file1.write('\n')
-            file1.write('\n'.join(content))
-            file1.write('\n\n')
+                # 提取当前页面内容
+                content = content_tree.xpath('//*[@id="content"]/p/text()')
+                next_page_text = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/text()')
+                next_page_href = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/@href')
+
+                # 清理无效内容
+                if content and '下一页' in content[-1]:
+                    content.pop()
+
+                # 内层进度条显示分页进度（如果需要）
+                page_count = 1
+                pages_to_fetch = 0
+
+                # 先计算有多少分页
+                temp_next_text = next_page_text[:]
+                temp_next_href = next_page_href[:]
+                while temp_next_text and '下一页' in temp_next_text[0]:
+                    if temp_next_href:
+                        pages_to_fetch += 1
+                        # 这里可以模拟计算分页数量，实际应用中可能需要特殊处理
+                        temp_next_text = []  # 简化处理，避免无限循环
+                    else:
+                        break
+
+                # 处理分页请求
+                with tqdm(total=pages_to_fetch, desc=f"  分页 {titles[i][:10]}",
+                          unit="页", leave=False) as page_pbar:
+                    while next_page_text and '下一页' in next_page_text[0]:
+                        # 构建下一页URL
+                        if next_page_href:
+                            next_page_url = f"{basic_url}{next_page_href[0]}"
+
+                            # 发起分页请求
+                            response = session.get(next_page_url, headers=config["headers"], proxies=config["proxy"],
+                                                   timeout=10)
+                            content_tree = etree.HTML(response.text)
+
+                            # 提取分页内容
+                            page_content = content_tree.xpath('//*[@id="content"]/p/text()')
+                            if page_content and '下一页' in page_content[-1]:
+                                page_content.pop()
+
+                            content.extend(page_content)
+                            # 更新分页信息
+                            next_page_text = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/text()')
+                            next_page_href = content_tree.xpath('//div[@class="bottem1"]/a[@id="pager_next"]/@href')
+                            page_count += 1
+                            page_pbar.update(1)
+                        else:
+                            break
+
+                # 写入文件
+                with open('小说/仙逆.txt', 'a', encoding='utf-8') as file:
+                    file.write(titles[i] + '\n')
+                    filtered_content = [line.strip() for line in content if line.strip()]
+                    file.write('\n'.join(filtered_content) + '\n\n')
+
+            except Exception as e:
+                chapter_pbar.set_postfix({"错误": f"章节{i}失败"})
+                continue
+            finally:
+                chapter_pbar.update(1)
 
 
 if __name__ == '__main__':
+    # 创建存储目录
     if not exists('./小说'):
         os.mkdir('小说')
 
-    headers, proxy = get_prosy_userAgent()
-
+    # 初始化请求
     basic_url = "https://www.biqugequ.org"
-    first_url = "https://www.biqugequ.org/xs_1588/"
+    first_url = "https://www.biqugequ.org/xs_339/"
 
-    response = session.get(first_url, headers=headers, proxies=proxy)
+    config = get_proxy_user_agent()
+    response = session.get(first_url, headers=config["headers"], proxies=config["proxy"], timeout=10)
     print('抓取页面完成')
 
-    page = etree.HTML(response.text)
-    title = page.xpath('//*[@id="list"]/dl/dd/a/@title')
-    url_list = page.xpath('//*[@id="list"]/dl/dd/a/@href')
-    print('开始抓取小说标题和链接')
+    # 解析目录页
+    page_tree = etree.HTML(response.text)
+    titles = page_tree.xpath('//*[@id="list"]/dl/dd/a/@title')
+    url_suffixes = page_tree.xpath('//*[@id="list"]/dl/dd/a/@href')
+    chapter_urls = [basic_url + suffix for suffix in url_suffixes]
 
-    url = []
-    for index in range(len(url_list)):
-        url.append(basic_url + url_list[index])
     print('开始抓取小说内容')
-
-    get_content(url, title)
+    fetch_chapter_content(chapter_urls, titles)
     print('小说抓取完成')
