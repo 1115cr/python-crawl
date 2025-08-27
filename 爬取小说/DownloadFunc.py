@@ -141,21 +141,21 @@ def fetch_single_chapter(chapter_info):
         print(f"章节 {title} 抓取失败: {e}")
         return index, title, []
 
-def write_chapter_to_file(chapter_data, filename):
-    """将章节内容写入文件，使用锁确保顺序写入"""
-    index, title, content = chapter_data
-
-    with file_lock:
-        with open(filename, 'a', encoding='utf-8') as file:
-            file.write(title + '\n')
-            file.write('\n'.join(content) + '\n\n')
-
-def fetch_chapter_content(chapter_urls, titles):
+def fetch_chapter_content(chapter_urls, titles, novel_name="未知小说"):
     """使用并发方式抓取章节内容，同时保证写入顺序"""
-    basic_url = "https://www.biqugequ.org"
+    # 创建存储目录
+    if not exists('./小说'):
+        os.mkdir('小说')
+
+    # 根据书名创建文件名，处理特殊字符
+    safe_novel_name = "".join(c for c in novel_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+    filename = f'小说/{safe_novel_name}.txt'
 
     # 创建章节信息列表，包含索引以保持顺序
     chapter_info_list = [(i, chapter_urls[i], titles[i]) for i in range(len(chapter_urls))]
+
+    # 存储已完成的章节结果
+    results = {}
 
     # 使用线程池并发抓取章节内容
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -163,54 +163,78 @@ def fetch_chapter_content(chapter_urls, titles):
         future_to_chapter = {executor.submit(fetch_single_chapter, info): info
                              for info in chapter_info_list}
 
-        # 收集结果并按顺序存储
-        results = {}
+        # 创建进度条
         with tqdm(total=len(chapter_urls), desc="章节进度", unit="章") as pbar:
+            # 实时更新正在处理的章节信息
+            next_index = 0
+
+            # 处理完成的任务
             for future in as_completed(future_to_chapter):
                 index, title, content = future.result()
                 results[index] = (title, content)
+                pbar.set_postfix({"当前章节": title[:15] + "..." if len(title) > 15 else title})
                 pbar.update(1)
 
                 # 检查是否可以按顺序写入文件
-                write_chapters_in_order(results, len(chapter_urls), '小说/仙逆.txt')
+                next_index = write_chapters_in_order(results, next_index, filename)
 
-    # 确保所有章节都已写入
-    write_chapters_in_order(results, len(chapter_urls), '小说/仙逆.txt')
+    print(f"小说《{novel_name}》抓取完成，保存路径: {filename}")
+    return filename
 
-def write_chapters_in_order(results, total_chapters, filename):
+def write_chapters_in_order(results, next_index, filename):
     """按顺序将已抓取的章节写入文件"""
-    next_index = getattr(write_chapters_in_order, 'next_index', 0)
-
-    while next_index < total_chapters and next_index in results:
+    while next_index in results:
         title, content = results[next_index]
         with file_lock:
             with open(filename, 'a', encoding='utf-8') as file:
                 file.write(title + '\n')
                 file.write('\n'.join(content) + '\n\n')
         next_index += 1
+    return next_index
 
-    # 更新下次开始写入的索引
-    write_chapters_in_order.next_index = next_index
+def download_novel(novel_url, novel_name):
+    """
+    下载整本小说的主函数
+    :param novel_url: 小说目录页URL
+    :param novel_name: 小说名称
+    :return: 保存的文件路径
+    """
+    # 初始化请求
+    basic_url = "https://www.biqugequ.org"
+
+    try:
+        config = get_proxy_user_agent()
+        response = session.get(novel_url, headers=config["headers"], proxies=config["proxy"], timeout=10)
+        print(f'抓取《{novel_name}》目录页面完成')
+
+        # 解析目录页
+        page_tree = etree.HTML(response.text)
+        titles = page_tree.xpath('//*[@id="list"]/dl/dd/a/@title')
+        url_suffixes = page_tree.xpath('//*[@id="list"]/dl/dd/a/@href')
+        chapter_urls = [basic_url + suffix for suffix in url_suffixes]
+
+        if not titles or not chapter_urls:
+            print(f"未找到《{novel_name}》的章节列表")
+            return None
+
+        print(f'开始抓取小说《{novel_name}》内容，共{len(titles)}章')
+        filename = fetch_chapter_content(chapter_urls, titles, novel_name)
+        print(f'小说《{novel_name}》抓取完成')
+        return filename
+
+    except Exception as e:
+        print(f"下载小说《{novel_name}》时出错: {e}")
+        return None
 
 if __name__ == '__main__':
+    # 示例用法
     # 创建存储目录
     if not exists('./小说'):
         os.mkdir('小说')
 
-    # 初始化请求
-    basic_url = "https://www.biqugequ.org"
-    first_url = "https://www.biqugequ.org/xs_339/"
+    # 下载特定小说示例
+    novel_url = "https://www.biqugequ.org/xs_339/"
+    novel_name = "仙逆"
 
-    config = get_proxy_user_agent()
-    response = session.get(first_url, headers=config["headers"], proxies=config["proxy"], timeout=10)
-    print('抓取页面完成')
-
-    # 解析目录页
-    page_tree = etree.HTML(response.text)
-    titles = page_tree.xpath('//*[@id="list"]/dl/dd/a/@title')
-    url_suffixes = page_tree.xpath('//*[@id="list"]/dl/dd/a/@href')
-    chapter_urls = [basic_url + suffix for suffix in url_suffixes]
-
-    print('开始抓取小说内容')
-    fetch_chapter_content(chapter_urls, titles)
-    print('小说抓取完成')
+    # 调用下载函数
+    download_novel(novel_url, novel_name)
